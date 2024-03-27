@@ -1,0 +1,14 @@
+{
+  "name": "Tab Capture",
+  "version": "0.1.0",
+  "key": "ddeghamhjbjkdcmcbohmmikldeplbcmb",
+  "manifest_version": 3,
+  "background": {
+    "service_worker": "background.js"
+  },
+  "sockets": {
+    "tcp": {"connect": ["*"]}
+  },
+  "permissions": ["tabs", "tabCapture", "storage", "activeTab", "scripting"],
+  "host_permissions": ["*://*/*", "<all_urls>", "https://*/*", "http://*/*"]
+}
