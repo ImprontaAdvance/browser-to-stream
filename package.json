@@ -1,7 +1,7 @@
 {
   "name": "browser-to-stream",
-  "version": "1.0.0",
-  "description": "",
+  "version": "0.0.1",
+  "description": " Programmatically audio/video stream from a browser page",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -16,8 +16,12 @@
     "/dist"
   ],
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "Matteo Manchi <matteo.manchi@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ImprontaAdvance/browser-to-stream.git"
+  },
   "devDependencies": {
     "@types/chrome": "^0.0.263",
     "@types/node": "^20.11.30",
