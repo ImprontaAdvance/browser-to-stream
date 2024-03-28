@@ -57,7 +57,7 @@ export async function startStreaming(page: Page, port: number = 8080) {
 
   return {
     streamId: res.streamId,
-    close: stopStreaming.bind(null, browser, res.streamId),
+    stop: stopStreaming.bind(null, browser, res.streamId),
   };
 }
 

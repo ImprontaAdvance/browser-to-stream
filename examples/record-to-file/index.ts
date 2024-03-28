@@ -22,9 +22,9 @@ import {
   const page = await browser.newPage();
   await page.goto('https://www.youtube.com/embed/4S5KBlieT0I?autoplay=1');
 
-  const {close} = await startStreaming(page);
+  const {stop} = await startStreaming(page);
   await setTimeout(4000);
-  await close();
+  await stop();
   await browser.close();
   stopServer();
 })();
