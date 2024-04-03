@@ -51,9 +51,18 @@ export async function startStreaming(page: Page, port: number = 8080) {
 
   await page.bringToFront();
 
-  const res = await extensionPage.evaluate((port) => {
-    return window.startStreaming(port);
-  }, port);
+  const {width, height} = await page.evaluate(() => {
+    return {width: window.innerWidth, height: window.innerHeight};
+  });
+
+  const res = await extensionPage.evaluate(
+    (port, width, height) => {
+      return window.startStreaming(port, width, height);
+    },
+    port,
+    width,
+    height
+  );
 
   return {
     streamId: res.streamId,
