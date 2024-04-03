@@ -13,11 +13,6 @@ type LaunchBrowserOptions = {
 
 type StreamID = string;
 
-type StartStreamingOptions = {
-  wsPort?: number;
-  recordingResizeFactor?: number;
-};
-
 export async function launchBrowser({
   viewport = {width: 1920, height: 1080},
   headless = true,
@@ -61,7 +56,7 @@ export async function startStreaming(
 
   const res = await extensionPage.evaluate(
     (wsPort, recordingResizeFactor) => {
-      return window.startStreaming(wsPort, recordingResizeFactor);
+      return window.startStreaming({wsPort, recordingResizeFactor});
     },
     wsPort,
     recordingResizeFactor

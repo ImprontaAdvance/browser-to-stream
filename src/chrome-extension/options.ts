@@ -8,7 +8,10 @@ type RecordingSetup = {
 const recordings = new Map<string, RecordingSetup>();
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function startStreaming(port: number, recordingResizeFactor: number = 1) {
+async function startStreaming({
+  wsPort = 8080,
+  recordingResizeFactor = 1,
+}: StartStreamingOptions = {}) {
   // @ts-expect-error getMediaStreamId returns a promise
   const streamId: string = await chrome.tabCapture.getMediaStreamId();
 
@@ -54,7 +57,7 @@ async function startStreaming(port: number, recordingResizeFactor: number = 1) {
   recorder.start(1500);
 
   const settings = getRecorderSettings();
-  const wsUrl = new URL(`ws://localhost:${port || 8080}`);
+  const wsUrl = new URL(`ws://localhost:${wsPort || 8080}`);
   wsUrl.searchParams.set('video', settings.video);
   wsUrl.searchParams.set('audio', settings.audio);
   wsUrl.searchParams.set('streamId', streamId);
@@ -75,7 +78,7 @@ async function startStreaming(port: number, recordingResizeFactor: number = 1) {
     streamId,
     recorder,
     stream,
-    wsPort: port,
+    wsPort: wsPort,
   });
 
   return {
