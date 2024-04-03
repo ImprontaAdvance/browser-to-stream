@@ -57,11 +57,13 @@ const browser = await launchBrowser({
 });
 ```
 
-To start the streaming at a different size from the browser's viewport, specify width and height on `startStreaming`
+To start the streaming at a different size from the browser's viewport, specify viewport's width and height on `startStreaming`
 ```typescript
 const {stop} = await startStreaming(page, {
-  width: 1280,
-  height: 720,
+   viewport: {
+    width: 1280,
+    height: 720,
+  }
 });
 ```
 

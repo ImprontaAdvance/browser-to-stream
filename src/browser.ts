@@ -14,9 +14,8 @@ type LaunchBrowserOptions = {
 type StreamID = string;
 
 type StartStreamingOptions = {
-  port?: number;
-  width?: number;
-  height?: number;
+  wsPort?: number;
+  viewport: {width?: number; height?: number};
 };
 
 export async function launchBrowser({
@@ -53,10 +52,14 @@ export async function launchBrowser({
 export async function startStreaming(
   page: Page,
   {
-    port = 8080,
-    width = undefined,
-    height = undefined,
-  }: StartStreamingOptions = {}
+    wsPort = 8080,
+    viewport = {
+      width: undefined,
+      height: undefined,
+    },
+  }: StartStreamingOptions = {
+    viewport: {width: undefined, height: undefined},
+  }
 ) {
   const browser = page.browser();
 
@@ -64,11 +67,13 @@ export async function startStreaming(
 
   await page.bringToFront();
 
+  const {width, height} = viewport;
+
   const res = await extensionPage.evaluate(
-    (port, width, height) => {
-      return window.startStreaming(port, width, height);
+    (wsPort, width, height) => {
+      return window.startStreaming(wsPort, width, height);
     },
-    port,
+    wsPort,
     width,
     height
   );
