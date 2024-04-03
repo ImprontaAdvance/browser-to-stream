@@ -13,6 +13,12 @@ type LaunchBrowserOptions = {
 
 type StreamID = string;
 
+type StartStreamingOptions = {
+  port?: number;
+  width?: number;
+  height?: number;
+};
+
 export async function launchBrowser({
   viewport = {width: 1920, height: 1080},
   headless = true,
@@ -44,16 +50,19 @@ export async function launchBrowser({
   return browser;
 }
 
-export async function startStreaming(page: Page, port: number = 8080) {
+export async function startStreaming(
+  page: Page,
+  {
+    port = 8080,
+    width = undefined,
+    height = undefined,
+  }: StartStreamingOptions = {}
+) {
   const browser = page.browser();
 
   const extensionPage = await getExtensionPage(browser);
 
   await page.bringToFront();
-
-  const {width, height} = await page.evaluate(() => {
-    return {width: window.innerWidth, height: window.innerHeight};
-  });
 
   const res = await extensionPage.evaluate(
     (port, width, height) => {

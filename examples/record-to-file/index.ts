@@ -8,13 +8,6 @@ import {
 
 (async function () {
   const browser = await launchBrowser();
-  // OR launch the browser at specific vieport, to manipulate the output format, default is 1920x1080
-  // const browser = await launchBrowser({
-  //   viewport: {
-  //     width: 1280,
-  //     height: 720,
-  //   },
-  // });
 
   const stopServer = startSocketServer(8080, (stream, data) => {
     console.log('start streaming ', data.streamId);

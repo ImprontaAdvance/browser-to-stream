@@ -8,9 +8,19 @@ type RecordingSetup = {
 const recordings = new Map<string, RecordingSetup>();
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function startStreaming(port: number, width: number, height: number) {
+async function startStreaming(port: number, width?: number, height?: number) {
   // @ts-expect-error getMediaStreamId returns a promise
   const streamId: string = await chrome.tabCapture.getMediaStreamId();
+
+  const [tab] = await chrome.tabs.query({active: true});
+  const [currentWindow] = await chrome.scripting.executeScript({
+    // @ts-expect-error tab id is not undefined
+    target: {tabId: tab.id},
+    func: () => ({width: window.innerWidth, height: window.innerHeight}),
+  });
+
+  const streamWidth = width || currentWindow.result?.width || 1920;
+  const streamHeight = height || currentWindow.result?.height || 1080;
 
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
@@ -25,10 +35,10 @@ async function startStreaming(port: number, width: number, height: number) {
       mandatory: {
         chromeMediaSource: 'tab',
         chromeMediaSourceId: streamId,
-        minWidth: width,
-        minHeight: height,
-        maxWidth: width,
-        maxHeight: height,
+        minWidth: streamWidth,
+        minHeight: streamHeight,
+        maxWidth: streamWidth,
+        maxHeight: streamHeight,
       },
     },
   });
