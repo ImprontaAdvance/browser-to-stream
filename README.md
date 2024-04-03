@@ -63,7 +63,6 @@ const {stop} = await startStreaming(page, {
   recordingResizeFactor: 0.5
 });
 ```
-Here an example of [two different streaming size](./examples/record-to-file/different-outputs.ts).
 
 Check more [examples](./examples/).
 
