@@ -8,7 +8,7 @@ type RecordingSetup = {
 const recordings = new Map<string, RecordingSetup>();
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function startStreaming(port: number, width?: number, height?: number) {
+async function startStreaming(port: number, recordingResizeFactor: number = 1) {
   // @ts-expect-error getMediaStreamId returns a promise
   const streamId: string = await chrome.tabCapture.getMediaStreamId();
 
@@ -19,8 +19,10 @@ async function startStreaming(port: number, width?: number, height?: number) {
     func: () => ({width: window.innerWidth, height: window.innerHeight}),
   });
 
-  const streamWidth = width || currentWindow.result?.width || 1920;
-  const streamHeight = height || currentWindow.result?.height || 1080;
+  const streamWidth =
+    (currentWindow.result?.width || 1920) * recordingResizeFactor;
+  const streamHeight =
+    (currentWindow.result?.height || 1080) * recordingResizeFactor;
 
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
