@@ -36,7 +36,7 @@ async function startStreaming(port: number) {
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
   const recorder = new MediaRecorder(stream, {
-    audioBitsPerSecond: 160000,
+    audioBitsPerSecond: 192000,
     videoBitsPerSecond: 8000000,
   });
   recorder.start(1500);
