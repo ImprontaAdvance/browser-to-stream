@@ -54,10 +54,6 @@ export function streamToRtmp(stream: Stream, rtmp: string) {
     '-r',
     '30',
     // frame rate 25
-    // video size
-    '-s',
-    '1920x1080',
-    // video size
     // set GOP (should be half of fps)
     '-g',
     '60',
@@ -78,22 +74,8 @@ export function streamToRtmp(stream: Stream, rtmp: string) {
     '3.1',
     '-c:a',
     'aac',
-    // audio bitrate
-    '-b:a',
-    '44k',
-    // audio bitrate
-    // audio stereo
     '-ac',
     '2',
-    // audio stereo
-    // bitrate
-    '-b:v',
-    '8000K',
-    '-maxrate',
-    '9000K',
-    '-bufsize',
-    '4000K',
-    // bitrate
     '-ar',
     String(128000 / 4),
     '-f',
