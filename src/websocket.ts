@@ -1,4 +1,4 @@
-import {Stream, Transform} from 'node:stream';
+import {Readable, Transform} from 'node:stream';
 import assert from 'node:assert';
 import {WebSocketServer} from 'ws';
 
@@ -10,7 +10,7 @@ type ConnectionParams = {
 
 export function startSocketServer(
   port: number = 8080,
-  onConnection: (stream: Stream, data: ConnectionParams) => void
+  onConnection: (stream: Readable, data: ConnectionParams) => void
 ): () => void {
   const wss = new WebSocketServer({
     port: port,
@@ -24,7 +24,6 @@ export function startSocketServer(
     const url = new URL(req.url, 'http://foo.com');
 
     const stream = new Transform({
-      // highWaterMark: 1024 * 1024 * 8,
       transform(chunk, encoding, callback) {
         callback(null, chunk);
       },
