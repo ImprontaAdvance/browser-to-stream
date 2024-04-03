@@ -8,9 +8,24 @@ type RecordingSetup = {
 const recordings = new Map<string, RecordingSetup>();
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function startStreaming(port: number) {
+async function startStreaming({
+  wsPort = 8080,
+  recordingResizeFactor = 1,
+}: StartStreamingOptions = {}) {
   // @ts-expect-error getMediaStreamId returns a promise
   const streamId: string = await chrome.tabCapture.getMediaStreamId();
+
+  const [tab] = await chrome.tabs.query({active: true});
+  const [currentWindow] = await chrome.scripting.executeScript({
+    // @ts-expect-error tab id is not undefined
+    target: {tabId: tab.id},
+    func: () => ({width: window.innerWidth, height: window.innerHeight}),
+  });
+
+  const streamWidth =
+    (currentWindow.result?.width || 1920) * recordingResizeFactor;
+  const streamHeight =
+    (currentWindow.result?.height || 1080) * recordingResizeFactor;
 
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
@@ -25,10 +40,10 @@ async function startStreaming(port: number) {
       mandatory: {
         chromeMediaSource: 'tab',
         chromeMediaSourceId: streamId,
-        minWidth: 1920,
-        minHeight: 1080,
-        maxWidth: 1920,
-        maxHeight: 1080,
+        minWidth: streamWidth,
+        minHeight: streamHeight,
+        maxWidth: streamWidth,
+        maxHeight: streamHeight,
       },
     },
   });
@@ -42,7 +57,7 @@ async function startStreaming(port: number) {
   recorder.start(1500);
 
   const settings = getRecorderSettings();
-  const wsUrl = new URL(`ws://localhost:${port || 8080}`);
+  const wsUrl = new URL(`ws://localhost:${wsPort || 8080}`);
   wsUrl.searchParams.set('video', settings.video);
   wsUrl.searchParams.set('audio', settings.audio);
   wsUrl.searchParams.set('streamId', streamId);
@@ -63,7 +78,7 @@ async function startStreaming(port: number) {
     streamId,
     recorder,
     stream,
-    wsPort: port,
+    wsPort: wsPort,
   });
 
   return {

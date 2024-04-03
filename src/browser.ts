@@ -44,16 +44,23 @@ export async function launchBrowser({
   return browser;
 }
 
-export async function startStreaming(page: Page, port: number = 8080) {
+export async function startStreaming(
+  page: Page,
+  {wsPort = 8080, recordingResizeFactor = 1}: StartStreamingOptions = {}
+) {
   const browser = page.browser();
 
   const extensionPage = await getExtensionPage(browser);
 
   await page.bringToFront();
 
-  const res = await extensionPage.evaluate((port) => {
-    return window.startStreaming(port);
-  }, port);
+  const res = await extensionPage.evaluate(
+    (wsPort, recordingResizeFactor) => {
+      return window.startStreaming({wsPort, recordingResizeFactor});
+    },
+    wsPort,
+    recordingResizeFactor
+  );
 
   return {
     streamId: res.streamId,

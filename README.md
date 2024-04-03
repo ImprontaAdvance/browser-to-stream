@@ -44,6 +44,26 @@ await browser.close();
 stopServer();
 ```
 
+## Streaming size
+
+The streaming output will be at the same size of the browser's viewport (1920x1080 by default), so you can control the output size by specifying it
+
+```typescript
+const browser = await launchBrowser({
+  viewport: {
+    width: 1280,
+    height: 720,
+  }
+});
+```
+
+To start the streaming at a different size from the browser's viewport, specify the `recordingResizeFactor` on `startStreaming` (default to `1`)
+```typescript
+const {stop} = await startStreaming(page, {
+  recordingResizeFactor: 0.5
+});
+```
+
 Check more [examples](./examples/).
 
 
