@@ -57,11 +57,11 @@ export function streamToRtmp(stream: Stream, rtmp: string) {
     // Tune the encoding params
     // frame rate 25
     '-r',
-    '30',
+    '25',
     // frame rate 25
     // set GOP (should be double of fps)
     '-g',
-    '60',
+    '50',
     // set GOP (should be double of fps)
     // minimum interval between IDR-frames (from INT_MIN to INT_MAX) (default 25)
     // '-keyint_min',
