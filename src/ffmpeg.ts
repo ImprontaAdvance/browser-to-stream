@@ -38,6 +38,7 @@ export function streamToFile(
 
 export function streamToRtmp(stream: Stream, rtmp: string) {
   // https://scribbleghost.net/2018/10/26/recommended-encoding-settings-for-youtube-in-ffmpeg/
+  // https://gist.github.com/tayvano/6e2d456a9897f55025e25035478a3a50
   const options = [
     '-y',
     '-i',
@@ -46,38 +47,58 @@ export function streamToRtmp(stream: Stream, rtmp: string) {
     '-c:v',
     'libx264',
     // video codec
+    // Set the encoding preset (cf. x264 —fullhelp) (default “medium”)
     '-preset',
     'veryfast',
+    // Set the encoding preset (cf. x264 —fullhelp) (default “medium”)
+    // Tune the encoding params
     '-tune',
     'zerolatency',
+    // Tune the encoding params
     // frame rate 25
     '-r',
-    '30',
+    '25',
     // frame rate 25
-    // set GOP (should be half of fps)
+    // set GOP (should be double of fps)
     '-g',
-    '60',
-    // set GOP (should be half of fps)
-    '-keyint_min',
-    '25',
-    '-crf',
-    '25',
+    '50',
+    // set GOP (should be double of fps)
+    // minimum interval between IDR-frames (from INT_MIN to INT_MAX) (default 25)
+    // '-keyint_min',
+    // '25',
+    // minimum interval between IDR-frames (from INT_MIN to INT_MAX) (default 25)
+    // quality for constant quality mode
+    // '-crf',
+    // '25',
+    // quality for constant quality mode
     // use 16:9 aspect ratio
     '-pix_fmt',
     'yuv420p',
     // use 16:9 aspect ratio
-    '-sc_threshold',
-    '0',
+    // scene change threshold (from INT_MIN to INT_MAX) (default 0)
+    // '-sc_threshold',
+    // '0',
+    // scene change threshold (from INT_MIN to INT_MAX) (default 0)
+    // Set profile restrictions (cf. x264 —fullhelp)
     '-profile:v',
     'main',
+    // Set profile restrictions (cf. x264 —fullhelp)
+    // Specify level (as defined by Annex A)
     '-level',
     '3.1',
+    // Specify level (as defined by Annex A)
+    // audio codec
     '-c:a',
     'aac',
+    // audio codec
+    // channels set number of audio channels
     '-ac',
     '2',
-    '-ar',
-    String(128000 / 4),
+    // channels set number of audio channels
+    // set audio sampling rate (in Hz)
+    // '-ar',
+    // String(128000 / 4),
+    // set audio sampling rate (in Hz)
     '-f',
     'flv',
     rtmp,
