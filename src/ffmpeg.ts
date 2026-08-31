@@ -1,6 +1,12 @@
 import {Stream} from 'node:stream';
 import {spawn} from 'node:child_process';
 
+export interface StreamToRtmpOptions {
+  audioBitrate?: string;
+  audioSampleRate?: number;
+  audioChannels?: number;
+}
+
 export function streamToFile(
   stream: Stream,
   file: string,
@@ -36,7 +42,15 @@ export function streamToFile(
   return ffmpeg;
 }
 
-export function streamToRtmp(stream: Stream, rtmp: string) {
+export function streamToRtmp(
+  stream: Stream,
+  rtmp: string,
+  {
+    audioBitrate = '192k',
+    audioSampleRate = 48000,
+    audioChannels = 2,
+  }: StreamToRtmpOptions = {}
+) {
   // https://scribbleghost.net/2018/10/26/recommended-encoding-settings-for-youtube-in-ffmpeg/
   // https://gist.github.com/tayvano/6e2d456a9897f55025e25035478a3a50
   const options = [
@@ -91,14 +105,18 @@ export function streamToRtmp(stream: Stream, rtmp: string) {
     '-c:a',
     'aac',
     // audio codec
+    // set audio bitrate
+    '-b:a',
+    audioBitrate,
+    // set audio bitrate
+    // set audio sampling rate (in Hz)
+    '-ar',
+    String(audioSampleRate),
+    // set audio sampling rate (in Hz)
     // channels set number of audio channels
     '-ac',
-    '2',
+    String(audioChannels),
     // channels set number of audio channels
-    // set audio sampling rate (in Hz)
-    // '-ar',
-    // String(128000 / 4),
-    // set audio sampling rate (in Hz)
     '-f',
     'flv',
     rtmp,
