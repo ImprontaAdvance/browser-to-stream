@@ -34,7 +34,7 @@
     "typescript-eslint": "^7.5.0"
   },
   "dependencies": {
-    "puppeteer": "^22.6.2",
+    "puppeteer": "22.6.2",
     "ws": "^8.16.0"
   }
 }

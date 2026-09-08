@@ -22,7 +22,7 @@ export async function launchBrowser({
     headless,
     executablePath: findBrowserExecutablePath(),
     defaultViewport: viewport,
-    ignoreDefaultArgs: ['--mute-audio'],
+    ignoreDefaultArgs: ['--mute-audio', '--disable-extensions'],
     args: [
       '--app',
       '--no-sandbox',
