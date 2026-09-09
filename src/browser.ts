@@ -101,16 +101,13 @@ function findBrowserExecutablePath(): string {
     return process.env.CHROME_BIN;
   }
 
-  const paths = [
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    '/usr/bin/google-chrome',
-  ];
-
-  for (const path of paths) {
-    if (existsSync(path)) {
-      return path;
-    }
+  const executablePath = puppeteer.executablePath();
+  if (existsSync(executablePath)) {
+    return executablePath;
   }
 
-  throw new Error('chrome executable path not found');
+  throw new Error(
+    `Chrome for Testing was not found at ${executablePath}. ` +
+      'Install Puppeteer browser dependencies or set CHROME_BIN to a compatible Chrome for Testing or Chromium executable.'
+  );
 }
