@@ -2,7 +2,7 @@ import {Readable, Transform} from 'node:stream';
 import assert from 'node:assert';
 import {WebSocketServer} from 'ws';
 
-type ConnectionParams = {
+export type StreamConnectionParams = {
   video: string;
   audio: string;
   streamId: string;
@@ -13,7 +13,7 @@ type ConnectionParams = {
 
 export function startSocketServer(
   port: number = 8080,
-  onConnection: (stream: Readable, data: ConnectionParams) => void
+  onConnection: (stream: Readable, data: StreamConnectionParams) => void
 ): () => void {
   const wss = new WebSocketServer({
     port: port,
@@ -42,7 +42,7 @@ export function startSocketServer(
 
     onConnection(
       stream,
-      Object.fromEntries(url.searchParams.entries()) as ConnectionParams
+      Object.fromEntries(url.searchParams.entries()) as StreamConnectionParams
     );
   });
 

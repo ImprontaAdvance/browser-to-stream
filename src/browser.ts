@@ -7,12 +7,28 @@ const extensionPath = join(__dirname, '/chrome-extension');
 const extensionId = 'hgidmgkiljoiikiahkhoggnfaiipcgen';
 const extensionPagesWithForwardedErrors = new WeakSet<Page>();
 
-type LaunchBrowserOptions = {
+export type LaunchBrowserOptions = {
   headless?: boolean;
   viewport?: {width: number; height: number};
 };
 
 type StreamID = string;
+
+export type StreamingEncoder = 'media-recorder' | 'webcodecs';
+
+export type StartStreamingOptions = {
+  wsPort?: number;
+  recordingResizeFactor?: number;
+  encoder?: StreamingEncoder;
+};
+
+export type StartStreamingResult = {
+  streamId: string;
+  encoder: StreamingEncoder;
+  videoCodec?: string;
+  audioCodec?: string;
+  stop: () => Promise<void>;
+};
 
 export async function launchBrowser({
   viewport = {width: 1920, height: 1080},
@@ -52,7 +68,7 @@ export async function startStreaming(
     recordingResizeFactor = 1,
     encoder = 'media-recorder',
   }: StartStreamingOptions = {}
-) {
+): Promise<StartStreamingResult> {
   const browser = page.browser();
 
   const extensionPage = await getExtensionPage(browser);

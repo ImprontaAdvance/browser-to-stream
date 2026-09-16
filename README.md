@@ -82,6 +82,47 @@ const {stop} = await startStreaming(page, {
 
 Check more [examples](./examples/).
 
+## WebCodecs stream copy to RTMP(S)
+
+The default `MediaRecorder` flow is unchanged. To produce H.264/AAC in Chrome
+and remux it to an RTMP(S) endpoint without a second FFmpeg encode, request the
+`webcodecs` encoder and use `streamFlvToRtmp` for its muxed FLV connection:
+
+```typescript
+import {
+  launchBrowser,
+  startSocketServer,
+  startStreaming,
+  streamFlvToRtmp,
+} from 'browser-to-stream';
+
+const browser = await launchBrowser({
+  viewport: {width: 1280, height: 720},
+});
+
+startSocketServer(8080, (stream, connection) => {
+  if (
+    connection.encoder !== 'webcodecs' ||
+    connection.track !== 'muxed' ||
+    connection.container !== 'flv'
+  ) {
+    stream.destroy(new Error('Expected a muxed FLV WebCodecs stream'));
+    return;
+  }
+
+  const rtmpsUrl = process.env.VIMEO_RTMPS_URL;
+  if (!rtmpsUrl) throw new Error('VIMEO_RTMPS_URL is required');
+  streamFlvToRtmp(stream, rtmpsUrl);
+});
+
+const page = await browser.newPage();
+await page.goto('https://example.com');
+await startStreaming(page, {encoder: 'webcodecs'});
+```
+
+`streamFlvToRtmp` invokes FFmpeg with `-f flv -c:v copy -c:a copy -f flv`.
+The caller owns the RTMP(S) endpoint URL and must avoid logging its stream key.
+
 
 ## How to use in docker
 

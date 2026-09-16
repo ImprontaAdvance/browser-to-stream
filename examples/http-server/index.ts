@@ -1,13 +1,11 @@
-import {spawn} from 'node:child_process';
-import {join} from 'node:path';
 import {Readable} from 'node:stream';
-import type {Page} from 'puppeteer';
 import Fastify, {RequestGenericInterface} from 'fastify';
 import {
   launchBrowser,
   startSocketServer,
   startStreaming,
   stopStreaming,
+  streamFlvToRtmp,
 } from 'browser-to-stream';
 
 interface StartRecordingRequest extends RequestGenericInterface {
@@ -22,79 +20,63 @@ interface StopRecordingRequest extends RequestGenericInterface {
   };
 }
 
-async function startTestSourcePlayback(page: Page, target: string) {
-  const url = new URL(target);
-  if (url.hostname !== 'localhost' || url.pathname !== '/test-source') {
-    return;
-  }
+const activeRtmpsStreams = new Map<string, Promise<void>>();
 
-  await page.waitForFunction('window.testSourceReady === true');
-  const testSource = await page.waitForSelector('#sync-test');
-  if (!testSource) {
-    throw new Error('The audio/video sync test source was not found');
-  }
-  const boundingBox = await testSource.boundingBox();
-  if (!boundingBox) {
-    throw new Error('The audio/video sync test source is not visible');
-  }
-
-  await page.mouse.click(
-    boundingBox.x + boundingBox.width / 2,
-    boundingBox.y + boundingBox.height / 2
-  );
-  await page.waitForFunction('window.testSourcePlaybackStarted === true');
-  await new Promise((resolve) => setTimeout(resolve, 500));
-}
-
-function recordWebCodecsStream(streamId: string, stream: Readable) {
-  const outputFile = join(
-    __dirname,
-    `test-${encodeURIComponent(streamId)}.mp4`
-  );
-  const ffmpeg = spawn(
-    'ffmpeg',
-    [
-      '-y',
-      '-f',
-      'flv',
-      '-i',
-      'pipe:0',
-      '-map',
-      '0:v:0',
-      '-map',
-      '0:a:0',
-      '-c:v',
-      'copy',
-      '-c:a',
-      'copy',
-      '-movflags',
-      '+faststart',
-      outputFile,
-    ],
-    {stdio: ['pipe', 'ignore', 'pipe']}
-  );
-
-  if (!ffmpeg.stdin) {
-    throw new Error('Cannot create an FFmpeg input pipe for WebCodecs');
-  }
-
-  stream.pipe(ffmpeg.stdin);
-  ffmpeg.stdin.on('error', (error) => {
-    if ((error as NodeJS.ErrnoException).code !== 'EPIPE') {
-      console.error('FFmpeg input error', error);
-    }
-  });
-  console.log('recording WebCodecs output to', outputFile);
+function streamWebCodecsToRtmps(
+  streamId: string,
+  stream: Readable,
+  rtmpsUrl: string
+) {
+  const ffmpeg = streamFlvToRtmp(stream, rtmpsUrl);
+  console.log('streaming WebCodecs output to Vimeo via RTMPS');
 
   ffmpeg.stderr?.on('data', (data) => {
-    console.log('FFmpeg STDERR:', data.toString());
+    console.log('FFmpeg STDERR:', redactRtmpsUrls(data.toString()));
   });
-  ffmpeg.on('close', (code, signal) => {
-    console.log('FFmpeg child process closed, code', code, 'signal', signal);
+  const done = new Promise<void>((resolve) => {
+    ffmpeg.on('close', (code, signal) => {
+      console.log('FFmpeg child process closed, code', code, 'signal', signal);
+      activeRtmpsStreams.delete(streamId);
+      resolve();
+    });
   });
+  activeRtmpsStreams.set(streamId, done);
+}
+
+function getVimeoRtmpsUrl() {
+  const streamUrl = process.env.VIMEO_RTMPS_URL;
+  const streamKey = process.env.VIMEO_STREAM_KEY;
+  if (!streamUrl || !streamKey) {
+    throw new Error(
+      'Set VIMEO_RTMPS_URL and VIMEO_STREAM_KEY before starting this example'
+    );
+  }
+
+  let endpoint: URL;
+  try {
+    endpoint = new URL(streamUrl);
+  } catch {
+    throw new Error('VIMEO_RTMPS_URL must be a valid RTMPS URL');
+  }
+  if (endpoint.protocol !== 'rtmps:' && endpoint.protocol !== 'rtmp:') {
+    throw new Error('VIMEO_RTMPS_URL must use the rtmp: or rtmps: protocol');
+  }
+
+  // Vimeo RTMPS ingest listens on 443. Vimeo normally includes it in the URL,
+  // but accepting an omitted port makes the local example less error-prone.
+  if (endpoint.protocol === 'rtmps:' && !endpoint.port) {
+    endpoint.port = '443';
+  }
+
+  return `${endpoint.toString().replace(/\/+$/, '')}/${streamKey}`;
+}
+
+function redactRtmpsUrls(message: string) {
+  return message.replace(/rtmps?:\/\/[^\s']+/g, '[redacted RTMPS URL]');
 }
 
 (async () => {
+  const rtmpsUrl = getVimeoRtmpsUrl();
   const browser = await launchBrowser({
     viewport: {width: 1280, height: 720},
   });
@@ -112,84 +94,16 @@ function recordWebCodecsStream(streamId: string, stream: Readable) {
     }
 
     console.log('WebCodecs muxed stream connected', data.streamId);
-    recordWebCodecsStream(data.streamId, stream);
+    streamWebCodecsToRtmps(data.streamId, stream, rtmpsUrl);
   });
 
   const fastify = Fastify();
-
-  fastify.get('/test-source', async function handler(_, reply) {
-    reply.type('text/html').send(`<!doctype html>
-<html>
-  <body id="sync-test" style="margin:0;overflow:hidden;background:#111;color:#fff">
-    <canvas id="canvas"></canvas>
-    <script>
-      const canvas = document.querySelector('#canvas');
-      const context = canvas.getContext('2d');
-      const audioContext = new AudioContext();
-      let startTime = 0;
-      let nextTick = 0;
-
-      function resize() {
-        canvas.width = innerWidth;
-        canvas.height = innerHeight;
-      }
-
-      function scheduleTick(time) {
-        const oscillator = audioContext.createOscillator();
-        const gain = audioContext.createGain();
-        oscillator.frequency.value = 1000;
-        gain.gain.setValueAtTime(0.08, time);
-        gain.gain.exponentialRampToValueAtTime(0.001, time + 0.08);
-        oscillator.connect(gain).connect(audioContext.destination);
-        oscillator.start(time);
-        oscillator.stop(time + 0.08);
-      }
-
-      function draw() {
-        const elapsed = Math.max(0, audioContext.currentTime - startTime);
-        while (nextTick < audioContext.currentTime + 2) {
-          scheduleTick(nextTick);
-          nextTick += 1;
-        }
-
-        const phase = elapsed % 1;
-        const flash = phase < 0.1;
-        context.fillStyle = flash ? '#ffffff' : '#111111';
-        context.fillRect(0, 0, canvas.width, canvas.height);
-        context.fillStyle = flash ? '#111111' : '#ffffff';
-        context.font = 'bold 180px sans-serif';
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
-        context.fillText(String(Math.floor(elapsed)), canvas.width / 2, canvas.height / 2);
-        context.font = '48px sans-serif';
-        context.fillText('flash + tick ogni secondo', canvas.width / 2, canvas.height / 2 + 150);
-        requestAnimationFrame(draw);
-      }
-
-      async function start() {
-        if (window.testSourcePlaybackStarted) return;
-        await audioContext.resume();
-        startTime = audioContext.currentTime + 0.25;
-        nextTick = startTime;
-        window.testSourcePlaybackStarted = true;
-        requestAnimationFrame(draw);
-      }
-
-      addEventListener('resize', resize);
-      addEventListener('pointerdown', start, {once: true});
-      resize();
-      window.testSourceReady = true;
-    </script>
-  </body>
-</html>`);
-  });
 
   fastify.get<StartRecordingRequest>(
     '/start-recording',
     async function handler(request, reply) {
       const page = await browser.newPage();
       await page.goto(request.query.target, {waitUntil: 'domcontentloaded'});
-      await startTestSourcePlayback(page, request.query.target);
 
       const {streamId, encoder, videoCodec, audioCodec} = await startStreaming(
         page,
@@ -203,7 +117,9 @@ function recordWebCodecsStream(streamId: string, stream: Readable) {
   fastify.get<StopRecordingRequest>(
     '/stop-recording',
     async function handler(request, reply) {
+      const rtmpsStreamDone = activeRtmpsStreams.get(request.query.streamId);
       await stopStreaming(browser, request.query.streamId);
+      await rtmpsStreamDone;
       reply.send();
     }
   );
