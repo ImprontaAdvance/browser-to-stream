@@ -1,5 +1,19 @@
-export {launchBrowser, startStreaming, stopStreaming} from './browser';
+export {
+  launchBrowser,
+  startStreaming,
+  stopStreaming,
+  type LaunchBrowserOptions,
+  type StartStreamingOptions,
+  type StartStreamingResult,
+  type StreamingEncoder,
+} from './browser';
 
-export {startSocketServer} from './websocket';
+export {startSocketServer, type StreamConnectionParams} from './websocket';
 
-export {streamToFile, streamToRtmp} from './ffmpeg';
+export {
+  streamFlvToRtmp,
+  streamMatroskaToRtmp,
+  streamToFile,
+  streamToRtmp,
+  type StreamToRtmpOptions,
+} from './ffmpeg';

@@ -82,6 +82,56 @@ const {stop} = await startStreaming(page, {
 
 Check more [examples](./examples/).
 
+## WebCodecs: H.264 copy to RTMP(S)
+
+The default `MediaRecorder` flow is unchanged. The WebCodecs flow produces
+H.264/Opus in Matroska. This works on desktop Linux, where WebCodecs AAC
+encoding is unavailable. FFmpeg copies H.264 and encodes only the Opus audio to
+AAC for RTMP(S):
+
+```typescript
+import {
+  launchBrowser,
+  startSocketServer,
+  startStreaming,
+  streamMatroskaToRtmp,
+} from 'browser-to-stream';
+
+const browser = await launchBrowser({
+  viewport: {width: 1280, height: 720},
+});
+
+startSocketServer(8080, (stream, connection) => {
+  if (
+    connection.encoder !== 'webcodecs' ||
+    connection.track !== 'muxed' ||
+    connection.container !== 'matroska'
+  ) {
+    stream.destroy(new Error('Expected a muxed Matroska WebCodecs stream'));
+    return;
+  }
+
+  const rtmpsUrl = process.env.VIMEO_RTMPS_URL;
+  if (!rtmpsUrl) throw new Error('VIMEO_RTMPS_URL is required');
+  streamMatroskaToRtmp(stream, rtmpsUrl);
+});
+
+const page = await browser.newPage();
+await page.goto('https://example.com');
+await startStreaming(page, {encoder: 'webcodecs'});
+```
+
+`streamMatroskaToRtmp` invokes FFmpeg with `-f matroska -c:v copy -c:a aac
+-f flv`: it never decodes or encodes H.264. The caller owns the RTMP(S)
+endpoint URL and must avoid logging its stream key.
+
+The WebCodecs encoder uses the captured audio timestamps as the timeline
+master. Video is emitted at 25 fps against that timeline, with a keyframe
+every two seconds. A silent tab still provides normal audio frames; if the
+audio capture itself pauses for 100 ms, the extension emits Opus silence on
+the same timeline, so video never waits for audio. The extension reports its
+audio-master A/V scheduling offset once per minute.
+
 
 ## How to use in docker
 

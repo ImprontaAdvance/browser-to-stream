@@ -7,6 +7,82 @@ export interface StreamToRtmpOptions {
   audioChannels?: number;
 }
 
+/**
+ * Remuxes the muxed FLV stream produced by `encoder: 'webcodecs'` to an
+ * RTMP(S) endpoint without decoding or encoding H.264/AAC.
+ */
+export function streamFlvToRtmp(stream: Stream, rtmp: string) {
+  const options = [
+    '-y',
+    '-f',
+    'flv',
+    '-i',
+    '-',
+    '-map',
+    '0:v:0',
+    '-map',
+    '0:a:0',
+    '-c:v',
+    'copy',
+    '-c:a',
+    'copy',
+    '-flvflags',
+    'no_duration_filesize',
+    '-f',
+    'flv',
+    rtmp,
+  ];
+
+  const ffmpeg = spawn('ffmpeg', options);
+  pipeStreamToFfmpeg(stream, ffmpeg);
+  return ffmpeg;
+}
+
+/**
+ * Streams the muxed Matroska output produced by `encoder: 'webcodecs'` on
+ * Linux. H.264 is copied; only Opus audio is encoded to AAC for RTMP(S).
+ */
+export function streamMatroskaToRtmp(
+  stream: Stream,
+  rtmp: string,
+  {
+    audioBitrate = '192k',
+    audioSampleRate = 48000,
+    audioChannels = 2,
+  }: StreamToRtmpOptions = {}
+) {
+  const options = [
+    '-y',
+    '-f',
+    'matroska',
+    '-i',
+    '-',
+    '-map',
+    '0:v:0',
+    '-map',
+    '0:a:0',
+    '-c:v',
+    'copy',
+    '-c:a',
+    'aac',
+    '-b:a',
+    audioBitrate,
+    '-ar',
+    String(audioSampleRate),
+    '-ac',
+    String(audioChannels),
+    '-flvflags',
+    'no_duration_filesize',
+    '-f',
+    'flv',
+    rtmp,
+  ];
+
+  const ffmpeg = spawn('ffmpeg', options);
+  pipeStreamToFfmpeg(stream, ffmpeg);
+  return ffmpeg;
+}
+
 export function streamToFile(
   stream: Stream,
   file: string,
@@ -24,20 +100,7 @@ export function streamToFile(
     ffmpeg.kill();
   });
 
-  // Handle STDIN pipe errors by logging to the console.
-  // These errors most commonly occur when FFmpeg closes and there is still
-  // data to write.  If left unhandled, the server will crash.
-  ffmpeg.stdin.on('error', (e) => {
-    console.log('FFmpeg STDIN Error', e);
-    ffmpeg.kill();
-  });
-
-  // // FFmpeg outputs all of its messages to STDERR.  Let's log them to the console.
-  // ffmpeg.stderr.on('data', (data) => {
-  //   console.log('FFmpeg STDERR:', data.toString());
-  // });
-
-  stream.pipe(ffmpeg.stdin);
+  pipeStreamToFfmpeg(stream, ffmpeg);
 
   return ffmpeg;
 }
@@ -132,20 +195,26 @@ export function streamToRtmp(
     ffmpeg.kill();
   });
 
-  // Handle STDIN pipe errors by logging to the console.
-  // These errors most commonly occur when FFmpeg closes and there is still
-  // data to write.  If left unhandled, the server will crash.
-  ffmpeg.stdin.on('error', (e) => {
-    console.log('FFmpeg STDIN Error', e);
-    ffmpeg.kill();
-  });
-
   // FFmpeg outputs all of its messages to STDERR.  Let's log them to the console.
   ffmpeg.stderr.on('data', (data) => {
     console.log('FFmpeg STDERR:', data.toString());
   });
 
-  stream.pipe(ffmpeg.stdin);
+  pipeStreamToFfmpeg(stream, ffmpeg);
 
   return ffmpeg;
+}
+
+function pipeStreamToFfmpeg(stream: Stream, ffmpeg: ReturnType<typeof spawn>) {
+  const stdin = ffmpeg.stdin;
+  if (!stdin) {
+    throw new Error('Cannot create an FFmpeg input pipe');
+  }
+
+  stdin.on('error', (error) => {
+    if ((error as NodeJS.ErrnoException).code !== 'EPIPE') {
+      console.log('FFmpeg STDIN Error', error);
+    }
+  });
+  stream.pipe(stdin);
 }
