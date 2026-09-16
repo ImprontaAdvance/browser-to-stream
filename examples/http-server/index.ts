@@ -56,11 +56,7 @@ function recordWebCodecsStream(streamId: string, stream: Readable) {
     [
       '-y',
       '-f',
-      'mpegts',
-      '-analyzeduration',
-      '5M',
-      '-probesize',
-      '10M',
+      'flv',
       '-i',
       'pipe:0',
       '-map',
@@ -99,12 +95,18 @@ function recordWebCodecsStream(streamId: string, stream: Readable) {
 }
 
 (async () => {
-  const browser = await launchBrowser();
+  const browser = await launchBrowser({
+    viewport: {width: 1280, height: 720},
+  });
 
   startSocketServer(8080, (stream, data) => {
-    if (data.encoder !== 'webcodecs' || data.track !== 'muxed') {
+    if (
+      data.encoder !== 'webcodecs' ||
+      data.track !== 'muxed' ||
+      data.container !== 'flv'
+    ) {
       stream.destroy(
-        new Error('The HTTP example only accepts a muxed WebCodecs stream')
+        new Error('The HTTP example only accepts a muxed FLV WebCodecs stream')
       );
       return;
     }

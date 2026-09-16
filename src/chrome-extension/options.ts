@@ -144,13 +144,13 @@ async function startWebCodecsStreaming({
   }
 
   const videoConfig: VideoEncoderConfig = {
-    codec: 'avc1.640028',
+    codec: 'avc1.42E028',
     width,
     height,
     bitrate: VIDEO_BITRATE,
     framerate: VIDEO_FRAME_RATE,
     latencyMode: 'realtime',
-    avc: {format: 'annexb'},
+    avc: {format: 'avc'},
   };
   const audioReader = new MediaStreamTrackProcessor<AudioData>({
     track: audioTrack,
@@ -192,13 +192,18 @@ async function startWebCodecsStreaming({
   }
 
   const muxedSocket = await openMuxedSocket({wsPort, streamId});
-  const muxer = new MpegTsMuxer(muxedSocket, audioConfig);
+  const muxer = new FlvMuxer(muxedSocket, audioConfig);
 
   let stopping = false;
-  let lastEncodedVideoTimestamp = Number.NEGATIVE_INFINITY;
-  let lastKeyframeTimestamp = Number.NEGATIVE_INFINITY;
+  let latestVideoFrame: VideoFrame | undefined;
   const videoEncoder = new VideoEncoder({
-    output: (chunk) => muxer.addVideoChunk(chunk),
+    output: (chunk, metadata) =>
+      muxer.addVideoChunk(
+        chunk,
+        metadata?.decoderConfig?.description
+          ? copyBufferSource(metadata.decoderConfig.description)
+          : undefined
+      ),
     error: (error) =>
       console.error('[WebCodecs] video encoder error', error.message),
   });
@@ -221,27 +226,24 @@ async function startWebCodecsStreaming({
     firstAudioData.close();
   }
 
-  void pumpVideoFrames(
+  const videoFramePump = retainLatestVideoFrame(
     videoReader,
-    videoEncoder,
     () => stopping,
-    (timestamp) => {
-      if (
-        timestamp - lastEncodedVideoTimestamp <
-        VIDEO_FRAME_INTERVAL_MICROSECONDS
-      ) {
-        return undefined;
-      }
-      lastEncodedVideoTimestamp = timestamp;
-      const keyFrame =
-        timestamp - lastKeyframeTimestamp >= KEYFRAME_INTERVAL_MICROSECONDS;
-      if (keyFrame) {
-        lastKeyframeTimestamp = timestamp;
-      }
-      return {keyFrame};
+    (frame) => {
+      latestVideoFrame?.close();
+      latestVideoFrame = frame;
     }
   ).catch((error) =>
     console.error('[WebCodecs] video capture error', getErrorMessage(error))
+  );
+  const fixedVideoPump = pumpFixedVideoFrames({
+    encoder: videoEncoder,
+    width,
+    height,
+    isStopping: () => stopping,
+    getLatestFrame: () => latestVideoFrame,
+  }).catch((error) =>
+    console.error('[WebCodecs] video encoder error', getErrorMessage(error))
   );
   void pumpAudioFrames(audioReader, audioEncoder, () => stopping).catch(
     (error) =>
@@ -260,7 +262,10 @@ async function startWebCodecsStreaming({
       await Promise.all([
         videoReader.cancel().catch(() => undefined),
         audioReader.cancel().catch(() => undefined),
+        videoFramePump,
+        fixedVideoPump,
       ]);
+      latestVideoFrame?.close();
       await Promise.all([
         videoEncoder.flush().catch(() => undefined),
         audioEncoder.flush().catch(() => undefined),
@@ -283,11 +288,10 @@ async function startWebCodecsStreaming({
   };
 }
 
-async function pumpVideoFrames(
+async function retainLatestVideoFrame(
   reader: ReadableStreamDefaultReader<VideoFrame>,
-  encoder: VideoEncoder,
   isStopping: () => boolean,
-  getEncodeOptions: (timestamp: number) => VideoEncoderEncodeOptions | undefined
+  onFrame: (frame: VideoFrame) => void
 ) {
   while (!isStopping()) {
     const {done, value: frame} = await reader.read();
@@ -295,19 +299,78 @@ async function pumpVideoFrames(
       return;
     }
 
+    if (isStopping()) {
+      frame.close();
+      return;
+    }
+
+    onFrame(frame);
+  }
+}
+
+async function pumpFixedVideoFrames({
+  encoder,
+  width,
+  height,
+  isStopping,
+  getLatestFrame,
+}: {
+  encoder: VideoEncoder;
+  width: number;
+  height: number;
+  isStopping: () => boolean;
+  getLatestFrame: () => VideoFrame | undefined;
+}) {
+  const fallbackCanvas = new OffscreenCanvas(width, height);
+  const fallbackContext = fallbackCanvas.getContext('2d');
+  if (!fallbackContext) {
+    throw new Error('Cannot create the fixed-rate video fallback frame');
+  }
+  fallbackContext.fillStyle = 'black';
+  fallbackContext.fillRect(0, 0, width, height);
+
+  const startTime = performance.now();
+  let frameIndex = 0;
+  let lastKeyframeTimestamp = Number.NEGATIVE_INFINITY;
+
+  while (!isStopping()) {
+    const elapsed = performance.now() - startTime;
+    frameIndex = Math.max(
+      frameIndex,
+      Math.floor((elapsed * 1000) / VIDEO_FRAME_INTERVAL_MICROSECONDS)
+    );
+    const timestamp = frameIndex * VIDEO_FRAME_INTERVAL_MICROSECONDS;
+    const scheduledTime = startTime + timestamp / 1000;
+    await waitFor(Math.max(0, scheduledTime - performance.now()));
+    if (isStopping()) {
+      return;
+    }
+
+    frameIndex += 1;
+    if (encoder.encodeQueueSize > 2) {
+      continue;
+    }
+
+    const keyFrame =
+      timestamp - lastKeyframeTimestamp >= KEYFRAME_INTERVAL_MICROSECONDS;
+    if (keyFrame) {
+      lastKeyframeTimestamp = timestamp;
+    }
+
+    const frame = new VideoFrame(getLatestFrame() || fallbackCanvas, {
+      timestamp,
+      duration: VIDEO_FRAME_INTERVAL_MICROSECONDS,
+    });
     try {
-      const encodeOptions = getEncodeOptions(frame.timestamp);
-      if (!encodeOptions) {
-        continue;
-      }
-      if (encoder.encodeQueueSize > 2 && !encodeOptions.keyFrame) {
-        continue;
-      }
-      encoder.encode(frame, encodeOptions);
+      encoder.encode(frame, {keyFrame});
     } finally {
       frame.close();
     }
   }
+}
+
+function waitFor(milliseconds: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }
 
 async function pumpAudioFrames(
@@ -341,6 +404,7 @@ async function openMuxedSocket({
   wsUrl.searchParams.set('track', 'muxed');
   wsUrl.searchParams.set('video', 'h264');
   wsUrl.searchParams.set('audio', 'aac');
+  wsUrl.searchParams.set('container', 'flv');
   wsUrl.searchParams.set('streamId', streamId);
 
   return new Promise((resolve, reject) => {
@@ -361,6 +425,144 @@ const MPEG_TS_AUDIO_PID = 0x102;
 const MPEG_TS_TABLE_INTERVAL_MICROSECONDS = 500_000;
 const MPEG_TS_TIMESTAMP_MODULO = 2 ** 33;
 
+class FlvMuxer {
+  private headerWritten = false;
+  private audioConfigWritten = false;
+  private videoConfigWritten = false;
+  private audioTimestampOrigin: number | undefined;
+  private videoTimestampOrigin: number | undefined;
+
+  constructor(
+    private readonly socket: WebSocket,
+    private readonly audioConfig: AudioEncoderConfig
+  ) {}
+
+  addVideoChunk(chunk: EncodedVideoChunk, decoderConfig?: Uint8Array) {
+    this.writeHeader();
+    const timestamp = this.normalizeTimestamp('video', chunk.timestamp);
+    if (decoderConfig) {
+      this.writeVideoConfig(decoderConfig);
+    }
+    if (!this.videoConfigWritten) {
+      throw new Error('H.264 decoder configuration is missing from WebCodecs');
+    }
+
+    const payload = copyEncodedChunk(chunk);
+    const data = new Uint8Array(payload.byteLength + 5);
+    data[0] = chunk.type === 'key' ? 0x17 : 0x27;
+    data[1] = 0x01;
+    data.set(payload, 5);
+    this.send(createFlvTag(0x09, timestamp, data));
+  }
+
+  addAudioChunk(chunk: EncodedAudioChunk) {
+    this.writeHeader();
+    const timestamp = this.normalizeTimestamp('audio', chunk.timestamp);
+    if (!this.audioConfigWritten) {
+      this.writeAudioConfig();
+    }
+
+    const payload = copyEncodedChunk(chunk);
+    const data = new Uint8Array(payload.byteLength + 2);
+    data.set([0xaf, 0x01]);
+    data.set(payload, 2);
+    this.send(createFlvTag(0x08, timestamp, data));
+  }
+
+  private writeHeader() {
+    if (this.headerWritten) {
+      return;
+    }
+    this.send(
+      new Uint8Array([
+        0x46, 0x4c, 0x56, 0x01, 0x05, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00,
+        0x00,
+      ])
+    );
+    this.headerWritten = true;
+  }
+
+  private writeVideoConfig(decoderConfig: Uint8Array) {
+    const data = new Uint8Array(decoderConfig.byteLength + 5);
+    data.set([0x17, 0x00, 0x00, 0x00, 0x00]);
+    data.set(decoderConfig, 5);
+    this.send(createFlvTag(0x09, 0, data));
+    this.videoConfigWritten = true;
+  }
+
+  private writeAudioConfig() {
+    const data = new Uint8Array(4);
+    data.set([0xaf, 0x00]);
+    data.set(createAudioSpecificConfig(this.audioConfig), 2);
+    this.send(createFlvTag(0x08, 0, data));
+    this.audioConfigWritten = true;
+  }
+
+  private normalizeTimestamp(track: 'audio' | 'video', timestamp: number) {
+    if (track === 'video') {
+      this.videoTimestampOrigin ??= timestamp;
+      return Math.max(
+        0,
+        Math.round((timestamp - this.videoTimestampOrigin) / 1000)
+      );
+    }
+
+    this.audioTimestampOrigin ??= timestamp;
+    return Math.max(
+      0,
+      Math.round((timestamp - this.audioTimestampOrigin) / 1000)
+    );
+  }
+
+  private send(data: Uint8Array) {
+    if (this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(data);
+    }
+  }
+}
+
+function createFlvTag(type: number, timestamp: number, data: Uint8Array) {
+  const tag = new Uint8Array(data.byteLength + 15);
+  tag[0] = type;
+  tag[1] = (data.byteLength >> 16) & 0xff;
+  tag[2] = (data.byteLength >> 8) & 0xff;
+  tag[3] = data.byteLength & 0xff;
+  tag[4] = (timestamp >> 16) & 0xff;
+  tag[5] = (timestamp >> 8) & 0xff;
+  tag[6] = timestamp & 0xff;
+  tag[7] = (timestamp >> 24) & 0xff;
+  tag.set(data, 11);
+
+  const previousTagSize = data.byteLength + 11;
+  tag[tag.byteLength - 4] = (previousTagSize >> 24) & 0xff;
+  tag[tag.byteLength - 3] = (previousTagSize >> 16) & 0xff;
+  tag[tag.byteLength - 2] = (previousTagSize >> 8) & 0xff;
+  tag[tag.byteLength - 1] = previousTagSize & 0xff;
+  return tag;
+}
+
+function copyBufferSource(source: AllowSharedBufferSource) {
+  const copy = new Uint8Array(source.byteLength);
+  copy.set(new Uint8Array(source as ArrayBuffer));
+  return copy;
+}
+
+function createAudioSpecificConfig(config: AudioEncoderConfig) {
+  const sampleRate = config.sampleRate;
+  const channels = config.numberOfChannels;
+  if (!sampleRate || !channels) {
+    throw new Error('AAC configuration is missing sample rate or channels');
+  }
+
+  const sampleRateIndex = getAdtsSampleRateIndex(sampleRate);
+  const audioObjectType = 2; // AAC-LC
+  return new Uint8Array([
+    (audioObjectType << 3) | (sampleRateIndex >> 1),
+    ((sampleRateIndex & 1) << 7) | (channels << 3),
+  ]);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 class MpegTsMuxer {
   private readonly continuityCounters = new Map<number, number>();
   private hasWrittenTables = false;

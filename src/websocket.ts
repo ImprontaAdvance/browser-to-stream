@@ -8,6 +8,7 @@ type ConnectionParams = {
   streamId: string;
   encoder?: 'webcodecs';
   track?: 'video' | 'audio' | 'muxed';
+  container?: 'flv';
 };
 
 export function startSocketServer(

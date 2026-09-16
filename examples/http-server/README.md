@@ -6,4 +6,4 @@
 
 `/test-source` è locale: mostra un flash e un contatore, con un tick audio di 80 ms nello stesso istante ogni secondo. Il browser riceve un click automatico per avviare l'audio.
 
-Nei log di FFmpeg l'input deve essere `mpegts`, con una traccia H.264 e una AAC. Non deve comparire l'avviso `Timestamps are unset in a packet`.
+Nei log di FFmpeg l'input deve essere `flv`, con una traccia H.264 e una AAC. Non deve comparire l'avviso `Timestamps are unset in a packet`.
