@@ -6,6 +6,8 @@ type ConnectionParams = {
   video: string;
   audio: string;
   streamId: string;
+  encoder?: 'webcodecs';
+  track?: 'video' | 'audio' | 'muxed';
 };
 
 export function startSocketServer(

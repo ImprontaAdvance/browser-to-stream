@@ -5,6 +5,7 @@ import {existsSync} from 'node:fs';
 
 const extensionPath = join(__dirname, '/chrome-extension');
 const extensionId = 'hgidmgkiljoiikiahkhoggnfaiipcgen';
+const extensionPagesWithForwardedErrors = new WeakSet<Page>();
 
 type LaunchBrowserOptions = {
   headless?: boolean;
@@ -46,7 +47,11 @@ export async function launchBrowser({
 
 export async function startStreaming(
   page: Page,
-  {wsPort = 8080, recordingResizeFactor = 1}: StartStreamingOptions = {}
+  {
+    wsPort = 8080,
+    recordingResizeFactor = 1,
+    encoder = 'media-recorder',
+  }: StartStreamingOptions = {}
 ) {
   const browser = page.browser();
 
@@ -55,15 +60,19 @@ export async function startStreaming(
   await page.bringToFront();
 
   const res = await extensionPage.evaluate(
-    (wsPort, recordingResizeFactor) => {
-      return window.startStreaming({wsPort, recordingResizeFactor});
+    (wsPort, recordingResizeFactor, encoder) => {
+      return window.startStreaming({wsPort, recordingResizeFactor, encoder});
     },
     wsPort,
-    recordingResizeFactor
+    recordingResizeFactor,
+    encoder
   );
 
   return {
     streamId: res.streamId,
+    encoder: res.encoder,
+    videoCodec: res.videoCodec,
+    audioCodec: res.audioCodec,
     stop: stopStreaming.bind(null, browser, res.streamId),
   };
 }
@@ -93,17 +102,26 @@ async function getExtensionPage(browser: Browser) {
     throw new Error('cannot get page of extension');
   }
 
+  if (!extensionPagesWithForwardedErrors.has(videoCaptureExtension)) {
+    extensionPagesWithForwardedErrors.add(videoCaptureExtension);
+    videoCaptureExtension.on('console', (message) => {
+      if (message.type() === 'error') {
+        console.error('[Chrome extension]', message.text());
+      }
+    });
+  }
+
   return videoCaptureExtension;
 }
 
 function findBrowserExecutablePath(): string {
-  if (process.env.CHROME_BIN) {
-    return process.env.CHROME_BIN;
-  }
-
   const executablePath = puppeteer.executablePath();
   if (existsSync(executablePath)) {
     return executablePath;
+  }
+
+  if (process.env.CHROME_BIN) {
+    return process.env.CHROME_BIN;
   }
 
   throw new Error(
