@@ -5,7 +5,7 @@ import {
   startSocketServer,
   startStreaming,
   stopStreaming,
-  streamFlvToRtmp,
+  streamMatroskaToRtmp,
 } from 'browser-to-stream';
 
 interface StartRecordingRequest extends RequestGenericInterface {
@@ -27,8 +27,8 @@ function streamWebCodecsToRtmps(
   stream: Readable,
   rtmpsUrl: string
 ) {
-  const ffmpeg = streamFlvToRtmp(stream, rtmpsUrl);
-  console.log('streaming WebCodecs output to Vimeo via RTMPS');
+  const ffmpeg = streamMatroskaToRtmp(stream, rtmpsUrl);
+  console.log('streaming WebCodecs output to Vimeo via RTMPS (H.264 copy)');
 
   ffmpeg.stderr?.on('data', (data) => {
     console.log('FFmpeg STDERR:', redactRtmpsUrls(data.toString()));
@@ -85,10 +85,12 @@ function redactRtmpsUrls(message: string) {
     if (
       data.encoder !== 'webcodecs' ||
       data.track !== 'muxed' ||
-      data.container !== 'flv'
+      data.container !== 'matroska'
     ) {
       stream.destroy(
-        new Error('The HTTP example only accepts a muxed FLV WebCodecs stream')
+        new Error(
+          'The HTTP example only accepts a muxed Matroska WebCodecs stream'
+        )
       );
       return;
     }

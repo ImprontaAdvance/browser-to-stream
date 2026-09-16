@@ -21,4 +21,4 @@ usare RTMPS.
 
 `curl 'http://localhost:3000/stop-recording?streamId=<STREAM ID>'`
 
-L'esempio invia direttamente il FLV a Vimeo con stream copy H.264/AAC; non crea un file. Nei log di FFmpeg l'input deve essere `flv`, con una traccia H.264 e una AAC, e lo stream mapping deve usare `copy` per entrambe le tracce.
+L'esempio invia direttamente a Vimeo un Matroska H.264/Opus. FFmpeg conserva il video con stream copy e converte solo l'audio in AAC prima dell'output FLV/RTMPS; non crea un file. Nei log l'input deve essere `matroska`, con una traccia H.264 e una Opus, e lo stream mapping deve mostrare `copy` per il video e `opus -> aac` per l'audio.

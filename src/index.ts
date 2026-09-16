@@ -12,6 +12,7 @@ export {startSocketServer, type StreamConnectionParams} from './websocket';
 
 export {
   streamFlvToRtmp,
+  streamMatroskaToRtmp,
   streamToFile,
   streamToRtmp,
   type StreamToRtmpOptions,

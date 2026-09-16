@@ -82,18 +82,19 @@ const {stop} = await startStreaming(page, {
 
 Check more [examples](./examples/).
 
-## WebCodecs stream copy to RTMP(S)
+## WebCodecs: H.264 copy to RTMP(S)
 
-The default `MediaRecorder` flow is unchanged. To produce H.264/AAC in Chrome
-and remux it to an RTMP(S) endpoint without a second FFmpeg encode, request the
-`webcodecs` encoder and use `streamFlvToRtmp` for its muxed FLV connection:
+The default `MediaRecorder` flow is unchanged. The WebCodecs flow produces
+H.264/Opus in Matroska. This works on desktop Linux, where WebCodecs AAC
+encoding is unavailable. FFmpeg copies H.264 and encodes only the Opus audio to
+AAC for RTMP(S):
 
 ```typescript
 import {
   launchBrowser,
   startSocketServer,
   startStreaming,
-  streamFlvToRtmp,
+  streamMatroskaToRtmp,
 } from 'browser-to-stream';
 
 const browser = await launchBrowser({
@@ -104,15 +105,15 @@ startSocketServer(8080, (stream, connection) => {
   if (
     connection.encoder !== 'webcodecs' ||
     connection.track !== 'muxed' ||
-    connection.container !== 'flv'
+    connection.container !== 'matroska'
   ) {
-    stream.destroy(new Error('Expected a muxed FLV WebCodecs stream'));
+    stream.destroy(new Error('Expected a muxed Matroska WebCodecs stream'));
     return;
   }
 
   const rtmpsUrl = process.env.VIMEO_RTMPS_URL;
   if (!rtmpsUrl) throw new Error('VIMEO_RTMPS_URL is required');
-  streamFlvToRtmp(stream, rtmpsUrl);
+  streamMatroskaToRtmp(stream, rtmpsUrl);
 });
 
 const page = await browser.newPage();
@@ -120,8 +121,9 @@ await page.goto('https://example.com');
 await startStreaming(page, {encoder: 'webcodecs'});
 ```
 
-`streamFlvToRtmp` invokes FFmpeg with `-f flv -c:v copy -c:a copy -f flv`.
-The caller owns the RTMP(S) endpoint URL and must avoid logging its stream key.
+`streamMatroskaToRtmp` invokes FFmpeg with `-f matroska -c:v copy -c:a aac
+-f flv`: it never decodes or encodes H.264. The caller owns the RTMP(S)
+endpoint URL and must avoid logging its stream key.
 
 
 ## How to use in docker
