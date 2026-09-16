@@ -10,6 +10,22 @@ This module uses [puppeteer](https://github.com/puppeteer/puppeteer) initialized
 ## Installation
 Install `browser-to-stream` with your preferred package manager for node.js
 
+The package launches the Chrome for Testing binary managed by Puppeteer, rather
+than a locally installed Google Chrome. This is required because recent
+Google Chrome releases do not allow unpacked extensions to be loaded from the
+command line.
+
+Puppeteer downloads that browser during installation. If your package manager
+blocks dependency install scripts, install it explicitly using the same
+Puppeteer version as your application, for example:
+
+```sh
+npx puppeteer browsers install chrome
+```
+
+To use a different compatible browser, set `CHROME_BIN` to its executable
+path. Use Chrome for Testing or Chromium, not the regular Google Chrome app.
+
 ## Usage
 
 ```typescript
@@ -92,8 +108,8 @@ RUN apt-get update \
 
 WORKDIR /home/app
 USER app
-# We don't need the standalone Chromium
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD true
+# Keep Puppeteer's Chrome for Testing download enabled: browser-to-stream uses
+# it to load its unpacked extension. Do not set PUPPETEER_SKIP_DOWNLOAD.
 
 # Copy code into /home/app
 # install dependencies
