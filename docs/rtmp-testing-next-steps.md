@@ -110,7 +110,19 @@ Stream #0:audio -> #0:audio (copy)
 
 ### Variante C2 — video copy, audio AAC
 
-Usare questa variante se Chrome produce H.264 con audio non compatibile con FLV/Vimeo:
+Usare questa variante se Chrome WebCodecs produce H.264 con audio non
+compatibile con FLV/Vimeo. L'implementazione del pacchetto produce un singolo
+Matroska H.264/Opus e usa i timestamp dell'audio catturato come clock master
+per i frame video fissi. Se la cattura audio non consegna frame per 100 ms,
+genera pacchetti Opus silenziosi sulla medesima timeline: il video non attende
+l'audio.
+
+```text
+WebCodecs H.264 + Opus
+  -> Matroska muxed con timeline A/V unica
+  -> FFmpeg video copy, Opus -> AAC
+  -> FLV/RTMPS
+```
 
 ```text
 -c:v copy
@@ -221,6 +233,9 @@ Se MediaRecorder non riesce a garantire il GOP richiesto, lo stream copy non è 
 - [ ] Verificare assenza di `Non-monotonous DTS`.
 - [ ] Verificare che Vimeo riceva bitrate e frame rate stabili.
 - [ ] Verificare playback e audio/video sync per almeno 10 minuti.
+- [ ] Eseguire almeno una prova continua di 60 minuti e confrontare il sync
+      all'inizio, a metà e alla fine; conservare il log periodico
+      `audio-master A/V scheduling offset`.
 - [ ] Simulare stop normale.
 - [ ] Simulare errore o interruzione RTMP.
 - [ ] Verificare cleanup completo.
@@ -318,4 +333,3 @@ Il cold start di circa due minuti non deve essere incluso nei risultati di encod
 - screenshot o export dello Stream Health Vimeo;
 - decisione finale supportata dalla matrice precedente;
 - lista separata degli interventi di produzione e delle ottimizzazioni successive.
-

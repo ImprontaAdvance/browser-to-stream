@@ -14,6 +14,8 @@ type WebCodecsStartResult = {
 const recordings = new Map<string, RecordingSetup>();
 const AUDIO_BITRATE = 192000;
 const OPUS_SAMPLE_RATE = 48000;
+const OPUS_FRAME_DURATION_MICROSECONDS = 20_000;
+const SILENCE_FALLBACK_DELAY_MICROSECONDS = 100_000;
 const VIDEO_BITRATE = 8000000;
 const VIDEO_FRAME_RATE = 25;
 const VIDEO_FRAME_INTERVAL_MICROSECONDS = 1_000_000 / VIDEO_FRAME_RATE;
@@ -164,13 +166,15 @@ async function startWebCodecsStreaming({
       'The tab audio track ended before WebCodecs could encode it'
     );
   }
+  const audioChannels = firstAudioData.numberOfChannels;
+  const audioClock = new AudioClock(firstAudioData.timestamp);
 
   const audioConfig: AudioEncoderConfig = {
     codec: 'opus',
     sampleRate: OPUS_SAMPLE_RATE,
-    numberOfChannels: firstAudioData.numberOfChannels,
+    numberOfChannels: audioChannels,
     bitrate: AUDIO_BITRATE,
-    opus: {format: 'opus', frameDuration: 20_000},
+    opus: {format: 'opus', frameDuration: OPUS_FRAME_DURATION_MICROSECONDS},
   };
   const [videoSupport, audioSupport] = await Promise.all([
     VideoEncoder.isConfigSupported(videoConfig),
@@ -196,13 +200,13 @@ async function startWebCodecsStreaming({
   }
 
   const muxedSocket = await openMuxedSocket({wsPort, streamId});
-  const timelineOrigin = firstAudioData.timestamp;
   const muxer = new MatroskaMuxer(muxedSocket, {
     width,
     height,
     audioConfig: supportedAudioConfig,
-    timelineOrigin,
+    timelineOrigin: audioClock.origin,
   });
+  const audioResampler = new AudioResampler(OPUS_SAMPLE_RATE);
 
   let stopping = false;
   let latestVideoFrame: VideoFrame | undefined;
@@ -236,7 +240,7 @@ async function startWebCodecsStreaming({
     track: videoTrack,
   }).readable.getReader();
 
-  encodeAudioData(firstAudioData, audioEncoder, OPUS_SAMPLE_RATE);
+  encodeAudioData(firstAudioData, audioEncoder, audioResampler, audioClock);
 
   const videoFramePump = retainLatestVideoFrame(
     videoReader,
@@ -252,19 +256,28 @@ async function startWebCodecsStreaming({
     encoder: videoEncoder,
     width,
     height,
-    timelineOrigin,
+    audioClock,
     isStopping: () => stopping,
     getLatestFrame: () => latestVideoFrame,
   }).catch((error) =>
     console.error('[WebCodecs] video encoder error', getErrorMessage(error))
   );
-  void pumpAudioFrames(
+  const audioFramePump = pumpAudioFrames(
     audioReader,
     audioEncoder,
-    OPUS_SAMPLE_RATE,
+    audioClock,
+    audioResampler,
     () => stopping
   ).catch((error) =>
     console.error('[WebCodecs] audio capture error', getErrorMessage(error))
+  );
+  const silentAudioPump = pumpSilentAudioFrames({
+    encoder: audioEncoder,
+    audioClock,
+    numberOfChannels: audioChannels,
+    isStopping: () => stopping,
+  }).catch((error) =>
+    console.error('[WebCodecs] silent audio error', getErrorMessage(error))
   );
 
   recordings.set(streamId, {
@@ -281,6 +294,8 @@ async function startWebCodecsStreaming({
         audioReader.cancel().catch(() => undefined),
         videoFramePump,
         fixedVideoPump,
+        audioFramePump,
+        silentAudioPump,
       ]);
       latestVideoFrame?.close();
       await Promise.all([
@@ -330,14 +345,14 @@ async function pumpFixedVideoFrames({
   encoder,
   width,
   height,
-  timelineOrigin,
+  audioClock,
   isStopping,
   getLatestFrame,
 }: {
   encoder: VideoEncoder;
   width: number;
   height: number;
-  timelineOrigin: number;
+  audioClock: AudioClock;
   isStopping: () => boolean;
   getLatestFrame: () => VideoFrame | undefined;
 }) {
@@ -349,28 +364,26 @@ async function pumpFixedVideoFrames({
   fallbackContext.fillStyle = 'black';
   fallbackContext.fillRect(0, 0, width, height);
 
-  const startTime = performance.now();
-  let frameIndex = 0;
+  let lastFrameIndex = -1;
   let lastKeyframeTimestamp = Number.NEGATIVE_INFINITY;
 
   while (!isStopping()) {
-    const elapsed = performance.now() - startTime;
-    frameIndex = Math.max(
-      frameIndex,
-      Math.floor((elapsed * 1000) / VIDEO_FRAME_INTERVAL_MICROSECONDS)
-    );
-    const offset = frameIndex * VIDEO_FRAME_INTERVAL_MICROSECONDS;
-    const timestamp = timelineOrigin + offset;
-    const scheduledTime = startTime + offset / 1000;
-    await waitFor(Math.max(0, scheduledTime - performance.now()));
+    const frameIndex = audioClock.getFrameIndex();
+    if (frameIndex <= lastFrameIndex) {
+      await waitFor(audioClock.millisecondsUntilNextFrame(lastFrameIndex));
+      continue;
+    }
+
+    lastFrameIndex = frameIndex;
     if (isStopping()) {
       return;
     }
 
-    frameIndex += 1;
     if (encoder.encodeQueueSize > 2) {
       continue;
     }
+
+    const timestamp = audioClock.timestampForFrame(frameIndex);
 
     const keyFrame =
       timestamp - lastKeyframeTimestamp >= KEYFRAME_INTERVAL_MICROSECONDS;
@@ -384,6 +397,7 @@ async function pumpFixedVideoFrames({
     });
     try {
       encoder.encode(frame, {keyFrame});
+      audioClock.reportVideoTimestamp(timestamp);
     } finally {
       frame.close();
     }
@@ -397,28 +411,44 @@ function waitFor(milliseconds: number) {
 async function pumpAudioFrames(
   reader: ReadableStreamDefaultReader<AudioData>,
   encoder: AudioEncoder,
-  sampleRate: number,
+  audioClock: AudioClock,
+  audioResampler: AudioResampler,
   isStopping: () => boolean
 ) {
   while (!isStopping()) {
     const {done, value: audioData} = await reader.read();
     if (done) {
+      console.warn(
+        '[WebCodecs] audio track ended; generating silence to keep the video timeline active'
+      );
       return;
     }
 
-    encodeAudioData(audioData, encoder, sampleRate);
+    encodeAudioData(audioData, encoder, audioResampler, audioClock);
   }
 }
 
 function encodeAudioData(
   audioData: AudioData,
   encoder: AudioEncoder,
-  sampleRate: number
+  audioResampler: AudioResampler,
+  audioClock: AudioClock
 ) {
-  const resampled = resampleAudioData(audioData, sampleRate);
+  const resampled = audioResampler.resample(audioData);
+  const timestamp = audioClock.reserveCapturedAudio(
+    resampled.timestamp,
+    getAudioDataDuration(resampled)
+  );
+  const timestamped =
+    timestamp === resampled.timestamp
+      ? resampled
+      : copyAudioDataWithTimestamp(resampled, timestamp);
   try {
-    encoder.encode(resampled);
+    encoder.encode(timestamped);
   } finally {
+    if (timestamped !== resampled) {
+      timestamped.close();
+    }
     if (resampled !== audioData) {
       resampled.close();
     }
@@ -426,40 +456,217 @@ function encodeAudioData(
   }
 }
 
-function resampleAudioData(audioData: AudioData, sampleRate: number) {
-  if (audioData.sampleRate === sampleRate) {
-    return audioData;
-  }
-
-  const inputFrames = audioData.numberOfFrames;
-  const outputFrames = Math.max(
-    1,
-    Math.round((inputFrames * sampleRate) / audioData.sampleRate)
-  );
-  const output = new Float32Array(outputFrames * audioData.numberOfChannels);
-
-  for (let channel = 0; channel < audioData.numberOfChannels; channel += 1) {
-    const input = new Float32Array(inputFrames);
-    audioData.copyTo(input, {planeIndex: channel, format: 'f32-planar'});
-
-    for (let frame = 0; frame < outputFrames; frame += 1) {
-      const position = (frame * audioData.sampleRate) / sampleRate;
-      const before = Math.min(inputFrames - 1, Math.floor(position));
-      const after = Math.min(inputFrames - 1, before + 1);
-      const fraction = position - before;
-      output[channel * outputFrames + frame] =
-        input[before] * (1 - fraction) + input[after] * fraction;
+async function pumpSilentAudioFrames({
+  encoder,
+  audioClock,
+  numberOfChannels,
+  isStopping,
+}: {
+  encoder: AudioEncoder;
+  audioClock: AudioClock;
+  numberOfChannels: number;
+  isStopping: () => boolean;
+}) {
+  while (!isStopping()) {
+    if (!audioClock.needsSyntheticAudio()) {
+      await waitFor(OPUS_FRAME_DURATION_MICROSECONDS / 1_000);
+      continue;
     }
+
+    const targetTimestamp = audioClock.currentTimestamp();
+    while (
+      !isStopping() &&
+      audioClock.scheduledAudioEndTimestamp < targetTimestamp
+    ) {
+      const timestamp = audioClock.reserveSilence(
+        OPUS_FRAME_DURATION_MICROSECONDS
+      );
+      const silence = new AudioData({
+        format: 'f32-planar',
+        sampleRate: OPUS_SAMPLE_RATE,
+        numberOfFrames:
+          (OPUS_FRAME_DURATION_MICROSECONDS * OPUS_SAMPLE_RATE) / 1_000_000,
+        numberOfChannels,
+        timestamp,
+        data: new Float32Array(
+          ((OPUS_FRAME_DURATION_MICROSECONDS * OPUS_SAMPLE_RATE) / 1_000_000) *
+            numberOfChannels
+        ),
+      });
+      try {
+        encoder.encode(silence);
+      } finally {
+        silence.close();
+      }
+    }
+    await waitFor(OPUS_FRAME_DURATION_MICROSECONDS / 1_000);
+  }
+}
+
+function getAudioDataDuration(audioData: AudioData) {
+  return (
+    audioData.duration ||
+    (audioData.numberOfFrames * 1_000_000) / audioData.sampleRate
+  );
+}
+
+function copyAudioDataWithTimestamp(audioData: AudioData, timestamp: number) {
+  const data = new Float32Array(
+    audioData.numberOfFrames * audioData.numberOfChannels
+  );
+  for (let channel = 0; channel < audioData.numberOfChannels; channel += 1) {
+    const plane = new Float32Array(audioData.numberOfFrames);
+    audioData.copyTo(plane, {planeIndex: channel, format: 'f32-planar'});
+    data.set(plane, channel * audioData.numberOfFrames);
   }
 
   return new AudioData({
     format: 'f32-planar',
-    sampleRate,
-    numberOfFrames: outputFrames,
+    sampleRate: audioData.sampleRate,
+    numberOfFrames: audioData.numberOfFrames,
     numberOfChannels: audioData.numberOfChannels,
-    timestamp: audioData.timestamp,
-    data: output,
+    timestamp,
+    data,
   });
+}
+
+class AudioClock {
+  readonly origin: number;
+  private nextAudioTimestamp: number;
+  private clockAnchorTimestamp: number;
+  private clockAnchorObservationTime: number;
+  private lastCapturedAudioObservationTime: number;
+  private sourceTimestampOffset = 0;
+  private lastReportedVideoTimestamp: number;
+  private reportedSyntheticAudio = false;
+
+  constructor(origin: number) {
+    this.origin = origin;
+    this.nextAudioTimestamp = origin;
+    this.clockAnchorTimestamp = origin;
+    this.clockAnchorObservationTime = performance.now();
+    this.lastCapturedAudioObservationTime = performance.now();
+    this.lastReportedVideoTimestamp = this.origin;
+  }
+
+  get scheduledAudioEndTimestamp() {
+    return this.nextAudioTimestamp;
+  }
+
+  reserveCapturedAudio(sourceTimestamp: number, duration: number) {
+    const mappedSourceTimestamp = sourceTimestamp + this.sourceTimestampOffset;
+    this.sourceTimestampOffset +=
+      this.nextAudioTimestamp - mappedSourceTimestamp;
+    const timestamp = sourceTimestamp + this.sourceTimestampOffset;
+    const endTimestamp = timestamp + duration;
+
+    this.nextAudioTimestamp = endTimestamp;
+    this.clockAnchorTimestamp = endTimestamp;
+    this.clockAnchorObservationTime = performance.now();
+    this.lastCapturedAudioObservationTime = performance.now();
+    this.reportedSyntheticAudio = false;
+    return timestamp;
+  }
+
+  reserveSilence(duration: number) {
+    const timestamp = this.nextAudioTimestamp;
+    this.nextAudioTimestamp += duration;
+    return timestamp;
+  }
+
+  needsSyntheticAudio() {
+    const needsSyntheticAudio =
+      performance.now() - this.lastCapturedAudioObservationTime >=
+      SILENCE_FALLBACK_DELAY_MICROSECONDS / 1_000;
+    if (needsSyntheticAudio && !this.reportedSyntheticAudio) {
+      console.warn(
+        '[WebCodecs] audio capture paused; generating Opus silence to keep the A/V timeline continuous'
+      );
+      this.reportedSyntheticAudio = true;
+    }
+    return needsSyntheticAudio;
+  }
+
+  getFrameIndex() {
+    return Math.floor(
+      Math.max(0, this.currentTimestamp() - this.origin) /
+        VIDEO_FRAME_INTERVAL_MICROSECONDS
+    );
+  }
+
+  timestampForFrame(frameIndex: number) {
+    return this.origin + frameIndex * VIDEO_FRAME_INTERVAL_MICROSECONDS;
+  }
+
+  millisecondsUntilNextFrame(lastFrameIndex: number) {
+    const nextTimestamp = this.timestampForFrame(lastFrameIndex + 1);
+    return Math.max(1, (nextTimestamp - this.currentTimestamp()) / 1_000);
+  }
+
+  reportVideoTimestamp(timestamp: number) {
+    if (
+      timestamp - this.lastReportedVideoTimestamp <
+      VIDEO_FRAME_RATE * 60 * VIDEO_FRAME_INTERVAL_MICROSECONDS
+    ) {
+      return;
+    }
+
+    const offset = timestamp - this.currentTimestamp();
+    console.info(
+      `[WebCodecs] audio-master A/V scheduling offset: ${Math.round(offset / 1_000)} ms`
+    );
+    this.lastReportedVideoTimestamp = timestamp;
+  }
+
+  currentTimestamp() {
+    return (
+      this.clockAnchorTimestamp +
+      Math.max(0, performance.now() - this.clockAnchorObservationTime) * 1_000
+    );
+  }
+}
+
+class AudioResampler {
+  private fractionalOutputFrames = 0;
+
+  constructor(private readonly targetSampleRate: number) {}
+
+  resample(audioData: AudioData) {
+    if (audioData.sampleRate === this.targetSampleRate) {
+      return audioData;
+    }
+
+    const inputFrames = audioData.numberOfFrames;
+    const exactOutputFrames =
+      (inputFrames * this.targetSampleRate) / audioData.sampleRate +
+      this.fractionalOutputFrames;
+    const outputFrames = Math.max(1, Math.floor(exactOutputFrames));
+    this.fractionalOutputFrames = exactOutputFrames - outputFrames;
+    const output = new Float32Array(outputFrames * audioData.numberOfChannels);
+
+    for (let channel = 0; channel < audioData.numberOfChannels; channel += 1) {
+      const input = new Float32Array(inputFrames);
+      audioData.copyTo(input, {planeIndex: channel, format: 'f32-planar'});
+
+      for (let frame = 0; frame < outputFrames; frame += 1) {
+        const position = (frame * audioData.sampleRate) / this.targetSampleRate;
+        const before = Math.min(inputFrames - 1, Math.floor(position));
+        const after = Math.min(inputFrames - 1, before + 1);
+        const fraction = position - before;
+        output[channel * outputFrames + frame] =
+          input[before] * (1 - fraction) + input[after] * fraction;
+      }
+    }
+
+    return new AudioData({
+      format: 'f32-planar',
+      sampleRate: this.targetSampleRate,
+      numberOfFrames: outputFrames,
+      numberOfChannels: audioData.numberOfChannels,
+      timestamp: audioData.timestamp,
+      data: output,
+    });
+  }
 }
 
 async function openMuxedSocket({

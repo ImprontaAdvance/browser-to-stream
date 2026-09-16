@@ -102,6 +102,11 @@ aac -> copy              nessuna ricodifica audio
 - [ ] Calcolare il frame rate effettivo dal contatore FFmpeg su almeno 60 secondi.
 - [ ] Verificare che la cadenza effettiva sia coerente con il target concordato.
 - [ ] Verificare che non compaiano `Non-monotonous DTS`, timestamp negativi o discontinuità.
+- [ ] Per la variante WebCodecs C2, verificare almeno ogni minuto il log
+      `audio-master A/V scheduling offset`; deve rimanere entro un frame.
+- [ ] Con una pagina che passa da audio udibile a silenzio, verificare che
+      video e traccia audio rimangano presenti; se compare il log
+      `generating Opus silence`, il video non deve interrompersi.
 - [ ] Verificare che `speed` rimanga stabile; per un input live un valore vicino a `1x` è normale.
 - [ ] Non usare `speed ~= 1x` come prova di saturazione CPU.
 
@@ -133,7 +138,8 @@ I pacchetti con flag `K` sono keyframe. Non inserire l'URL di ingest o la stream
 - [ ] Verificare `maxrate` e `bufsize`, se configurati.
 - [ ] Verificare la qualità dello stream nel pannello di health Vimeo.
 - [ ] Verificare assenza di lag crescente, freeze o riconnessioni.
-- [ ] Verificare audio/video sync per almeno 10 minuti.
+- [ ] Verificare audio/video sync per almeno 10 minuti e in almeno una prova
+      continua di 60 minuti.
 - [ ] Verificare che risoluzione, frame rate, bitrate e GOP rispettino il piano Vimeo utilizzato.
 
 Riferimenti Vimeo:
@@ -237,4 +243,3 @@ ps -eo pid,ppid,pcpu,pmem,rss,comm,args --sort=-pcpu
 - [ ] Cleanup completo dopo stop ed errore.
 - [ ] Riduzione CPU ripetibile rispetto alla baseline.
 - [ ] Qualità Vimeo accettabile per almeno 10 minuti di test.
-

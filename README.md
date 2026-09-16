@@ -125,6 +125,13 @@ await startStreaming(page, {encoder: 'webcodecs'});
 -f flv`: it never decodes or encodes H.264. The caller owns the RTMP(S)
 endpoint URL and must avoid logging its stream key.
 
+The WebCodecs encoder uses the captured audio timestamps as the timeline
+master. Video is emitted at 25 fps against that timeline, with a keyframe
+every two seconds. A silent tab still provides normal audio frames; if the
+audio capture itself pauses for 100 ms, the extension emits Opus silence on
+the same timeline, so video never waits for audio. The extension reports its
+audio-master A/V scheduling offset once per minute.
+
 
 ## How to use in docker
 
